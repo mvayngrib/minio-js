@@ -1,0 +1,1508 @@
+/*
+ * Minio Javascript Library for Amazon S3 Compatible Cloud Storage, (C) 2016 Minio, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+'use strict';
+
+function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj['default'] = obj; return newObj; } }
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { 'default': obj }; }
+
+var _chai = require('chai');
+
+var _concatStream = require('concat-stream');
+
+var _concatStream2 = _interopRequireDefault(_concatStream);
+
+var _nock = require('nock');
+
+var _nock2 = _interopRequireDefault(_nock);
+
+var _through2 = require('through2');
+
+var _through22 = _interopRequireDefault(_through2);
+
+var _stream = require('stream');
+
+var _stream2 = _interopRequireDefault(_stream);
+
+var _distMainMinio = require('../../../dist/main/minio');
+
+var Minio = _interopRequireWildcard(_distMainMinio);
+
+var _distMainHelpers = require('../../../dist/main/helpers');
+
+var _distMainBucketPolicy = require('../../../dist/main/bucket-policy');
+
+require('source-map-support').install();
+
+var Package = require('../../../package.json');
+
+describe('Helpers', function () {
+  it('should validate for s3 endpoint', function () {
+    _chai.assert.equal((0, _distMainHelpers.isValidEndpoint)('s3.amazonaws.com'), true);
+  });
+  it('should validate for s3 china', function () {
+    _chai.assert.equal((0, _distMainHelpers.isValidEndpoint)('s3.cn-north-1.amazonaws.com.cn'), true);
+  });
+  it('should fail for invalid endpoint', function () {
+    _chai.assert.equal((0, _distMainHelpers.isValidEndpoint)('s3-us-west-2.amazonaws.com'), false);
+  });
+  it('should fail for invalid endpoint characters', function () {
+    _chai.assert.equal((0, _distMainHelpers.isValidEndpoint)('111.#2.11'), false);
+  });
+  it('should validate for valid ip', function () {
+    _chai.assert.equal((0, _distMainHelpers.isValidIP)('1.1.1.1'), true);
+  });
+  it('should fail for invalid ip', function () {
+    _chai.assert.equal((0, _distMainHelpers.isValidIP)('1.1.1'), false);
+  });
+  it('should make date short', function () {
+    var date = new Date('2012-12-03T17:25:36.331Z');
+
+    _chai.assert.equal((0, _distMainHelpers.makeDateShort)(date), '20121203');
+  });
+  it('should make date long', function () {
+    var date = new Date('2017-08-11T17:26:34.935Z');
+
+    _chai.assert.equal((0, _distMainHelpers.makeDateLong)(date), '20170811T172634Z');
+  });
+});
+
+describe('CopyConditions', function () {
+  var date = '2017-08-11T19:34:18.437Z';
+
+  var cc = new Minio.CopyConditions();
+
+  describe('#setModified', function () {
+    it('should take a date argument', function () {
+      cc.setModified(new Date(date));
+
+      _chai.assert.equal(cc.modified, date);
+    });
+
+    it('should throw without date', function () {
+      _chai.assert.throws(function () {
+        cc.setModified();
+      }, /date must be of type Date/);
+
+      _chai.assert.throws(function () {
+        cc.setModified({ hi: 'there' });
+      }, /date must be of type Date/);
+    });
+  });
+
+  describe('#setUnmodified', function () {
+    it('should take a date argument', function () {
+      cc.setUnmodified(new Date(date));
+
+      _chai.assert.equal(cc.unmodified, date);
+    });
+
+    it('should throw without date', function () {
+      _chai.assert.throws(function () {
+        cc.setUnmodified();
+      }, /date must be of type Date/);
+
+      _chai.assert.throws(function () {
+        cc.setUnmodified({ hi: 'there' });
+      }, /date must be of type Date/);
+    });
+  });
+});
+
+describe('Client', function () {
+  var nockRequests = [];
+  this.timeout(5000);
+  beforeEach(function () {
+    _nock2['default'].cleanAll();
+    nockRequests = [];
+  });
+  afterEach(function () {
+    nockRequests.forEach(function (element) {
+      if (!element.request.isDone()) {
+        element.request.done();
+      }
+    });
+  });
+  var MockResponse = function MockResponse(address) {
+    var request = (0, _nock2['default'])(address),
+        trace = new Error().stack;
+    nockRequests.push({
+      request: request,
+      trace: trace
+    });
+    return request;
+  },
+      client = new Minio.Client({
+    endPoint: 'localhost',
+    port: 9000,
+    accessKey: 'accesskey',
+    secretKey: 'secretkey',
+    secure: false
+  });
+  describe('new client', function () {
+    it('should work with https', function () {
+      var client = new Minio.Client({
+        endPoint: 'localhost',
+        accessKey: 'accesskey',
+        secretKey: 'secretkey'
+      });
+      _chai.assert.equal(client.port, 443);
+    });
+    it('should override port with http', function () {
+      var client = new Minio.Client({
+        endPoint: 'localhost',
+        port: 9000,
+        accessKey: 'accesskey',
+        secretKey: 'secretkey',
+        secure: false
+      });
+      _chai.assert.equal(client.port, 9000);
+    });
+    it('should work with http', function () {
+      var client = new Minio.Client({
+        endPoint: 'localhost',
+        accessKey: 'accesskey',
+        secretKey: 'secretkey',
+        secure: false
+      });
+      _chai.assert.equal(client.port, 80);
+    });
+    it('should override port with https', function () {
+      var client = new Minio.Client({
+        endPoint: 'localhost',
+        port: 9000,
+        accessKey: 'accesskey',
+        secretKey: 'secretkey'
+      });
+      _chai.assert.equal(client.port, 9000);
+    });
+    it('should fail with url', function (done) {
+      try {
+        new Minio.Client({
+          endPoint: 'http://localhost:9000',
+          accessKey: 'accesskey',
+          secretKey: 'secretkey'
+        });
+      } catch (e) {
+        done();
+      }
+    });
+    it('should fail with alphanumeric', function (done) {
+      try {
+        new Minio.Client({
+          endPoint: 'localhost##$@3',
+          accessKey: 'accesskey',
+          secretKey: 'secretkey'
+        });
+      } catch (e) {
+        done();
+      }
+    });
+    it('should fail with no url', function (done) {
+      try {
+        new Minio.Client({
+          accessKey: 'accesskey',
+          secretKey: 'secretkey'
+        });
+      } catch (e) {
+        done();
+      }
+    });
+    it('should fail with bad port', function (done) {
+      try {
+        new Minio.Client({
+          endPoint: 'localhost',
+          port: -1,
+          accessKey: 'accesskey',
+          secretKey: 'secretkey'
+        });
+      } catch (e) {
+        done();
+      }
+    });
+  });
+  describe('Presigned URL', function () {
+    describe('presigned-get', function () {
+      it('should not generate presigned url with no access key', function (done) {
+        try {
+          var client = new Minio.Client({
+            endPoint: 'localhost',
+            port: 9000,
+            secure: false
+          });
+          client.presignedGetObject('bucket', 'object', 1000, function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should not generate presigned url with wrong expires param', function (done) {
+        try {
+          client.presignedGetObject('bucket', 'object', '0', function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should generate presigned url', function (done) {
+        MockResponse('http://localhost:9000').get('/bucket?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+        client.presignedGetObject('bucket', 'object', 86400, function (e, url) {
+          _chai.assert.equal(e, null);
+          _chai.assert.equal(url.length > 0, true);
+          done();
+        });
+      });
+    });
+    describe('presigned-put', function () {
+      it('should not generate presigned url with no access key', function (done) {
+        try {
+          var client = new Minio.Client({
+            endPoint: 'localhost',
+            port: 9000,
+            secure: false
+          });
+          client.presignedPutObject('bucket', 'object', 1000, function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should not generate presigned url with wrong expires param', function (done) {
+        try {
+          client.presignedPutObject('bucket', 'object', '0', function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should generate presigned url', function (done) {
+        client.presignedPutObject('bucket', 'object', 1000, function (e, url) {
+          _chai.assert.equal(e, null);
+          _chai.assert.equal(url.length > 0, true);
+          done();
+        });
+      });
+      it('should use default expiry if none is given', function (done) {
+        client.presignedPutObject('bucket', 'object', function (e, url) {
+          _chai.assert.equal(e, null);
+          (0, _chai.assert)(url.length > 0);
+          done();
+        });
+      });
+    });
+  });
+  describe('User Agent', function () {
+    it('should have a default user agent', function () {
+      var client = new Minio.Client({
+        endPoint: 'localhost',
+        accessKey: 'accesskey',
+        secretKey: 'secretkey'
+      });
+      _chai.assert.equal('Minio (' + process.platform + '; ' + process.arch + ') minio-js/' + Package.version, client.userAgent);
+    });
+    it('should set user agent', function () {
+      var client = new Minio.Client({
+        endPoint: 'localhost',
+        accessKey: 'accesskey',
+        secretKey: 'secretkey'
+      });
+      client.setAppInfo('test', '3.2.0');
+      _chai.assert.equal('Minio (' + process.platform + '; ' + process.arch + ') minio-js/' + Package.version + ' test/3.2.0', client.userAgent);
+    });
+    it('should set user agent without comments', function () {
+      var client = new Minio.Client({
+        endPoint: 'localhost',
+        accessKey: 'accesskey',
+        secretKey: 'secretkey'
+      });
+      client.setAppInfo('test', '3.2.0');
+      _chai.assert.equal('Minio (' + process.platform + '; ' + process.arch + ') minio-js/' + Package.version + ' test/3.2.0', client.userAgent);
+    });
+    it('should not set user agent without name', function (done) {
+      try {
+        var client = new Minio.Client({
+          endPoint: 'localhost',
+          accessKey: 'accesskey',
+          secretKey: 'secretkey'
+        });
+        client.setAppInfo(null, '3.2.0');
+      } catch (e) {
+        done();
+      }
+    });
+    it('should not set user agent with empty name', function (done) {
+      try {
+        var client = new Minio.Client({
+          endPoint: 'localhost',
+          accessKey: 'accesskey',
+          secretKey: 'secretkey'
+        });
+        client.setAppInfo('', '3.2.0');
+      } catch (e) {
+        done();
+      }
+    });
+    it('should not set user agent without version', function (done) {
+      try {
+        var client = new Minio.Client({
+          endPoint: 'localhost',
+          accessKey: 'accesskey',
+          secretKey: 'secretkey'
+        });
+        client.setAppInfo('test', null);
+      } catch (e) {
+        done();
+      }
+    });
+    it('should not set user agent with empty version', function (done) {
+      try {
+        var client = new Minio.Client({
+          endPoint: 'localhost',
+          accessKey: 'accesskey',
+          secretKey: 'secretkey'
+        });
+        client.setAppInfo('test', '');
+      } catch (e) {
+        done();
+      }
+    });
+  });
+  describe('Authentication', function () {
+    describe('not set', function () {
+      it('should not send auth info without keys', function (done) {
+        client = new Minio.Client({
+          endPoint: 'localhost',
+          port: 9000,
+          secure: false
+        });
+        MockResponse('http://localhost:9000').get('/bucket?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+        MockResponse('http://localhost:9000', {
+          badHeaders: ['Authorization']
+        }).head('/bucket/object').reply(200, '', {
+          'ETag': 'etag',
+          'Content-Length': 11,
+          'Last-Modified': 'lastmodified',
+          'Content-Type': 'text/plain'
+        });
+        client.statObject('bucket', 'object', function (e, r) {
+          _chai.assert.deepEqual(r, {
+            size: 11,
+            'lastModified': 'lastmodified',
+            etag: 'etag',
+            contentType: 'text/plain'
+          });
+          done();
+        });
+      });
+    });
+    describe('set with access and secret keys', function () {
+      it('should not send auth info without keys', function (done) {
+        client = new Minio.Client({
+          endPoint: 'localhost',
+          port: 9000,
+          accessKey: 'accessKey',
+          secretKey: 'secretKey',
+          secure: false
+        });
+        MockResponse('http://localhost:9000').get('/bucket?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+        MockResponse('http://localhost:9000', {
+          reqHeaders: {
+            'x-amz-content-sha256': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+            'Authorization': '/AWS4-HMAC-SHA256/i'
+          }
+        }).head('/bucket/object').reply(200, '', {
+          'ETag': 'etag',
+          'Content-Length': 11,
+          'Last-Modified': 'lastmodified',
+          'Content-Type': 'text/plain'
+        });
+        client.statObject('bucket', 'object', function (e, r) {
+          _chai.assert.deepEqual(r, {
+            size: 11,
+            'lastModified': 'lastmodified',
+            etag: 'etag',
+            contentType: 'text/plain'
+          });
+          done();
+        });
+      });
+    });
+  });
+
+  describe('Bucket API calls', function () {
+    describe('#makeBucket(bucket, region, callback)', function () {
+      it('should call the callback on success', function (done) {
+        MockResponse('http://localhost:9000').put('/bucket').reply(200);
+        client.makeBucket('bucket', '', function (e) {
+          _chai.assert.equal(e, null);
+          done();
+        });
+      });
+      it('pass an error into the callback on failure', function (done) {
+        MockResponse('http://localhost:9000').put('/bucket').reply(400, generateError('code', 'message', 'requestid', 'hostid', '/bucket'));
+        client.makeBucket('bucket', '', checkError('code', 'message', 'requestid', 'hostid', '/bucket', done));
+      });
+      it('should fail on null bucket', function (done) {
+        try {
+          client.makeBucket(null, '', _chai.assert.fail);
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on empty bucket', function (done) {
+        try {
+          client.makeBucket('', '', _chai.assert.fail);
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on empty bucket', function (done) {
+        try {
+          client.makeBucket('  \n  \t  ', '', _chai.assert.fail);
+        } catch (e) {
+          done();
+        }
+      });
+    });
+
+    describe('#listBuckets()', function () {
+      it('should generate a bucket iterator', function (done) {
+        MockResponse('http://localhost:9000').get('/').reply(200, '<ListAllMyBucketsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner><Buckets><Bucket><Name>bucket</Name><CreationDate>2015-05-05T20:35:51.410Z</CreationDate></Bucket><Bucket><Name>foo</Name><CreationDate>2015-05-05T20:35:47.170Z</CreationDate></Bucket></Buckets></ListAllMyBucketsResult>');
+        var expectedResults = [{
+          name: 'bucket',
+          creationDate: new Date('2015-05-05T20:35:51.410Z')
+        }, {
+          name: 'foo',
+          creationDate: new Date('2015-05-05T20:35:47.170Z')
+        }];
+        client.listBuckets(function (e, buckets) {
+          _chai.assert.deepEqual(buckets, expectedResults);
+          done();
+        });
+      });
+      it('should pass error to callback', function (done) {
+        MockResponse('http://localhost:9000').get('/').reply(400, generateError('code', 'message', 'requestid', 'hostid', '/'));
+        client.listBuckets(checkError('code', 'message', 'requestid', 'hostid', '/', done));
+      });
+    });
+
+    describe('#bucketExists(bucket, cb)', function () {
+      it('should call callback with no options if successful', function (done) {
+        MockResponse('http://localhost:9000').get('/bucket?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+        MockResponse('http://localhost:9000').head('/bucket').reply(200);
+        client.bucketExists('bucket', function (e) {
+          _chai.assert.equal(e, null);
+          done();
+        });
+      });
+      it('should pass error to callback', function (done) {
+        MockResponse('http://localhost:9000').head('/bucket').reply(400, generateError('code', 'message', 'requestid', 'hostid', 'resource'));
+        client.bucketExists('bucket', checkError('code', 'message', 'requestid', 'hostid', 'resource', done));
+      });
+      it('should return an error on moved permanently', function (done) {
+        MockResponse('http://localhost:9000').get('/bucket?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+        MockResponse('http://localhost:9000').head('/bucket').reply(301);
+        client.bucketExists('bucket', checkError('MovedPermanently', 'Moved Permanently', null, null, null, done));
+      });
+      it('should return an error on 404', function (done) {
+        MockResponse('http://localhost:9000').get('/bucket?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+        MockResponse('http://localhost:9000').head('/bucket').reply(403);
+        client.bucketExists('bucket', checkError('AccessDenied', 'Valid and authorized credentials required', null, null, null, done));
+      });
+      it('should return an error on 404', function (done) {
+        MockResponse('http://localhost:9000').get('/bucket?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+        MockResponse('http://localhost:9000').head('/bucket').reply(404);
+        client.bucketExists('bucket', checkError('NotFound', 'Not Found', null, null, null, done));
+      });
+      it('should fail on null bucket', function (done) {
+        try {
+          client.bucketExists(null, _chai.assert.fail);
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on empty bucket', function (done) {
+        try {
+          client.bucketExists('', _chai.assert.fail);
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on empty bucket', function (done) {
+        try {
+          client.BucketExists('  \n  \t  ', _chai.assert.fail);
+        } catch (e) {
+          done();
+        }
+      });
+    });
+
+    describe('#removeBucket(bucket, cb)', function () {
+      it('should remove a bucket', function (done) {
+        MockResponse('http://localhost:9000').get('/bucket?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+        MockResponse('http://localhost:9000')['delete']('/bucket').reply(204);
+        client.removeBucket('bucket', function () {
+          done();
+        });
+      });
+      it('should pass error to callback', function (done) {
+        MockResponse('http://localhost:9000').get('/bucket?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+        MockResponse('http://localhost:9000')['delete']('/bucket').reply(400, generateError('code', 'message', 'requestid', 'hostid', 'resource'));
+        client.removeBucket('bucket', checkError('code', 'message', 'requestid', 'hostid', 'resource', done));
+      });
+      it('should fail on null bucket', function (done) {
+        try {
+          client.removeBucket(null, _chai.assert.fail);
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on empty bucket', function (done) {
+        try {
+          client.removeBucket('', _chai.assert.fail);
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on empty bucket', function (done) {
+        try {
+          client.removeBucket('  \n  \t  ', _chai.assert.fail);
+        } catch (e) {
+          done();
+        }
+      });
+    });
+  });
+
+  describe('bucket policy', function () {
+    describe('constants', function () {
+      it('should equal string values', function () {
+        _chai.assert.equal(Minio.Policy.NONE, 'none');
+        _chai.assert.equal(Minio.Policy.READONLY, 'readonly');
+        _chai.assert.equal(Minio.Policy.READWRITE, 'readwrite');
+        _chai.assert.equal(Minio.Policy.WRITEONLY, 'writeonly');
+      });
+    });
+    describe('internal #parseBucketPolicy(policy, bucketName, objectPrefix)', function () {
+      it('should parse Policy.READONLY', function () {
+        var payload = JSON.parse('{"Version":"2012-10-17","Statement":[{"Sid":"","Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetBucketLocation","s3:ListBucket"],"Resource":["arn:aws:s3:::bucket"]},{"Sid":"","Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetObject"],"Resource":["arn:aws:s3:::bucket/*"]}]}');
+
+        _chai.assert.equal((0, _distMainBucketPolicy.parseBucketPolicy)(payload, 'bucket', ''), Minio.Policy.READONLY);
+      });
+      it('should parse Policy.WRITEONLY', function () {
+        var payload = JSON.parse('{"Version":"2012-10-17","Statement":[{"Sid":"","Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetBucketLocation","s3:ListBucketMultipartUploads"],"Resource":["arn:aws:s3:::bucket"]},{"Sid":"","Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:AbortMultipartUpload","s3:DeleteObject","s3:ListMultipartUploadParts","s3:PutObject"],"Resource":["arn:aws:s3:::bucket/*"]}]}');
+
+        _chai.assert.equal((0, _distMainBucketPolicy.parseBucketPolicy)(payload, 'bucket', ''), Minio.Policy.WRITEONLY);
+      });
+      it('should parse Policy.READWRITE', function () {
+        var payload = JSON.parse('{"Version":"2012-10-17","Statement":[{"Sid":"","Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetBucketLocation","s3:ListBucketMultipartUploads"],"Resource":["arn:aws:s3:::bucket"]},{"Sid":"","Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:AbortMultipartUpload","s3:DeleteObject","s3:ListMultipartUploadParts","s3:PutObject","s3:GetObject"],"Resource":["arn:aws:s3:::bucket/*"]}]}');
+
+        _chai.assert.equal((0, _distMainBucketPolicy.parseBucketPolicy)(payload, 'bucket', ''), Minio.Policy.READWRITE);
+      });
+      it('should parse AWS Policy.READONLY', function () {
+        var payload = JSON.parse('{"Version":"2012-10-17","Statement":[{"Sid":"","Effect":"Allow","Principal":{"AWS":"*"},"Action":"s3:GetBucketLocation","Resource":"arn:aws:s3:::bucket"},{"Sid":"","Effect":"Allow","Principal":{"AWS":"*"},"Action":"s3:GetObject","Resource":"arn:aws:s3:::bucket/*"},{"Sid":"","Effect":"Allow","Principal":{"AWS":"*"},"Action":"s3:ListBucket","Resource":"arn:aws:s3:::bucket"}]}');
+
+        _chai.assert.equal((0, _distMainBucketPolicy.parseBucketPolicy)(payload, 'bucket', ''), Minio.Policy.READONLY);
+      });
+      it('should parse AWS Policy.READWRITE', function () {
+        // AWS drops the array for the string, so the parser should normalize this back.
+        var payload = JSON.parse('{"Version":"2012-10-17","Statement":[{"Sid":"","Effect":"Allow","Principal":{"AWS":"*"},"Action":["s3:GetBucketLocation","s3:ListBucketMultipartUploads"],"Resource":"arn:aws:s3:::bucket"},{"Sid":"","Effect":"Allow","Principal":{"AWS":"*"},"Action":["s3:GetObject","s3:AbortMultipartUpload","s3:DeleteObject","s3:ListMultipartUploadParts","s3:PutObject"],"Resource":"arn:aws:s3:::bucket/*"},{"Sid":"","Effect":"Allow","Principal":{"AWS":"*"},"Action":"s3:ListBucket","Resource":"arn:aws:s3:::bucket"}]}');
+
+        _chai.assert.equal((0, _distMainBucketPolicy.parseBucketPolicy)(payload, 'bucket', ''), Minio.Policy.READWRITE);
+      });
+      it('should parse Policy.NONE', function () {
+        var payload = JSON.parse('{"Version":"2012-10-17","Statement":[{"Sid":"","Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:DeleteObject"],"Resource":["arn:aws:s3:::bucket/*"]}]}');
+
+        _chai.assert.equal((0, _distMainBucketPolicy.parseBucketPolicy)(payload, 'bucket', ''), Minio.Policy.NONE);
+      });
+    });
+    describe('internal #generateBucketPolicy(policy, bucketName, objectPrefix)', function () {
+      it('should handle Policy.READONLY', function () {
+        var payload = (0, _distMainBucketPolicy.generateBucketPolicy)(Minio.Policy.READONLY, 'bucket5', '');
+
+        _chai.assert.equal(JSON.stringify(payload), '{"Version":"2012-10-17","Statement":[{"Sid":"","Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetBucketLocation"],"Resource":["arn:aws:s3:::bucket5"]},{"Sid":"","Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetObject"],"Resource":["arn:aws:s3:::bucket5/*"]},{"Sid":"","Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:ListBucket"],"Resource":["arn:aws:s3:::bucket5"]}]}');
+      });
+      it('should handle Policy.WRITEONLY', function () {
+        var payload = (0, _distMainBucketPolicy.generateBucketPolicy)(Minio.Policy.WRITEONLY, 'bucket6', '');
+
+        _chai.assert.equal(JSON.stringify(payload), '{"Version":"2012-10-17","Statement":[{"Sid":"","Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetBucketLocation","s3:ListBucketMultipartUploads"],"Resource":["arn:aws:s3:::bucket6"]},{"Sid":"","Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:AbortMultipartUpload","s3:DeleteObject","s3:ListMultipartUploadParts","s3:PutObject"],"Resource":["arn:aws:s3:::bucket6/*"]}]}');
+      });
+      it('should handle Policy.READWRITE', function () {
+        var payload = (0, _distMainBucketPolicy.generateBucketPolicy)(Minio.Policy.READWRITE, 'bucket8', '');
+
+        _chai.assert.equal(JSON.stringify(payload), '{"Version":"2012-10-17","Statement":[{"Sid":"","Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetBucketLocation","s3:ListBucketMultipartUploads"],"Resource":["arn:aws:s3:::bucket8"]},{"Sid":"","Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetObject","s3:AbortMultipartUpload","s3:DeleteObject","s3:ListMultipartUploadParts","s3:PutObject"],"Resource":["arn:aws:s3:::bucket8/*"]},{"Sid":"","Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:ListBucket"],"Resource":["arn:aws:s3:::bucket8"]}]}');
+      });
+      it('should handle Policy.READWRITE with prefix', function () {
+        var payload = (0, _distMainBucketPolicy.generateBucketPolicy)(Minio.Policy.READWRITE, 'bucket9', 'prefix');
+
+        _chai.assert.equal(JSON.stringify(payload), '{"Version":"2012-10-17","Statement":[{"Sid":"","Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetBucketLocation","s3:ListBucketMultipartUploads"],"Resource":["arn:aws:s3:::bucket9"]},{"Sid":"","Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetObject","s3:AbortMultipartUpload","s3:DeleteObject","s3:ListMultipartUploadParts","s3:PutObject"],"Resource":["arn:aws:s3:::bucket9/prefix*"]},{"Sid":"","Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:ListBucket"],"Resource":["arn:aws:s3:::bucket9"],"Condition":{"StringEquals":{"s3:prefix":"prefix"}}}]}');
+      });
+    });
+  });
+
+  describe('object level', function () {
+    describe('#getObject(bucket, object, callback)', function () {
+      it('should return a stream object', function (done) {
+        MockResponse('http://localhost:9000').get('/bucket?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+        MockResponse('http://localhost:9000').get('/bucket/object').reply(200, 'hello world');
+        client.getObject('bucket', 'object', function (e, r) {
+          _chai.assert.equal(e, null);
+          r.pipe((0, _concatStream2['default'])(function (buf) {
+            _chai.assert.equal(buf, 'hello world');
+            done();
+          }));
+        });
+      });
+      it('should pass error to callback', function (done) {
+        MockResponse('http://localhost:9000').get('/bucket/object').reply(400, generateError('code', 'message', 'requestid', 'hostid', '/bucket/object'));
+        client.getObject('bucket', 'object', checkError('code', 'message', 'requestid', 'hostid', '/bucket/object', done));
+      });
+      it('should fail on null bucket', function (done) {
+        try {
+          client.getObject(null, 'hello', function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on empty bucket', function (done) {
+        try {
+          client.getObject('', 'hello', function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on empty bucket', function (done) {
+        try {
+          client.getObject('  \n  \t  ', 'hello', function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on null object', function (done) {
+        try {
+          client.getObject('hello', null, function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on empty object', function (done) {
+        try {
+          client.getObject('hello', '', function () {});
+        } catch (e) {
+          done();
+        }
+      });
+    });
+    describe('#getPartialObject(bucket, object, offset, length, callback)', function () {
+      it('should work with offset and length', function (done) {
+        MockResponse('http://localhost:9000').get('/bucket?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+        MockResponse('http://localhost:9000', {
+          reqHeaders: {
+            'range': '10-21'
+          }
+        }).get('/bucket/object').reply(206, 'hello world');
+        client.getPartialObject('bucket', 'object', 10, 11, function (e, r) {
+          _chai.assert.equal(e, null);
+          r.pipe((0, _concatStream2['default'])(function (buf) {
+            _chai.assert.equal(buf, 'hello world');
+            done();
+          }));
+        });
+      });
+      it('should work with length as 0', function (done) {
+        MockResponse('http://localhost:9000', {
+          reqHeaders: {
+            'range': '10-'
+          }
+        }).get('/bucket/object').reply(206, 'hello world');
+        client.getPartialObject('bucket', 'object', 10, 0, function (e, r) {
+          _chai.assert.equal(e, null);
+          r.pipe((0, _concatStream2['default'])(function (buf) {
+            _chai.assert.equal(buf, 'hello world');
+            done();
+          }));
+        });
+      });
+      it('should work with offset as 0', function (done) {
+        MockResponse('http://localhost:9000', {
+          reqHeaders: {
+            'range': '0-21'
+          }
+        }).get('/bucket/object').reply(206, 'hello world');
+        client.getPartialObject('bucket', 'object', 0, 11, function (e, r) {
+          _chai.assert.equal(e, null);
+          r.pipe((0, _concatStream2['default'])(function (buf) {
+            _chai.assert.equal(buf, 'hello world');
+            done();
+          }));
+        });
+      });
+    });
+
+    describe('#putObject(bucket, object, source, size, contentType, callback)', function () {
+      describe('with small objects using single put', function () {
+        it('should put an object', function (done) {
+          MockResponse('http://localhost:9000').put('/bucket/object', 'hello world').reply(200);
+          var s = new _stream2['default'].Readable();
+          s._read = function () {};
+          s.push('hello world');
+          s.push(null);
+          client.putObject('bucket', 'object', s, 11, 'text/plain', done);
+        });
+        it('should pass error to callback', function (done) {
+          MockResponse('http://localhost:9000').put('/bucket/object', 'hello world').reply(400, generateError('code', 'message', 'requestid', 'hostid', 'resource'));
+          var s = new _stream2['default'].Readable();
+          s._read = function () {};
+          s.push('hello world');
+          s.push(null);
+          client.putObject('bucket', 'object', s, 11, '', checkError('code', 'message', 'requestid', 'hostid', 'resource', done));
+        });
+        it('should fail when data is smaller than specified', function (done) {
+          var s = new _stream2['default'].Readable();
+          s._read = function () {};
+          s.push('hello world');
+          s.push(null);
+          client.putObject('bucket', 'object', s, 12, '', function (e) {
+            if (e) {
+              done();
+            }
+          });
+        });
+        it('should fail when data is larger than specified', function (done) {
+          var s = new _stream2['default'].Readable();
+          s._read = function () {};
+          s.push('hello world');
+          s.push(null);
+          client.putObject('bucket', 'object', s, 10, '', function (e) {
+            if (e) {
+              done();
+            }
+          });
+        });
+        it('should fail with invalid bucket name', function () {
+          _chai.assert.throws(function () {
+            client.putObject('ab', 'object', function () {});
+          }, /Invalid bucket name/);
+        });
+        it('should fail with invalid object name', function () {
+          _chai.assert.throws(function () {
+            client.putObject('bucket', '', function () {});
+          }, /Invalid object name/);
+        });
+        it('should error with size > maxObjectSize', function () {
+          _chai.assert.throws(function () {
+            client.putObject('bucket', 'object', new _stream2['default'].Readable(), client.maxObjectSize + 1, function () {});
+          }, /size should not be more than/);
+        });
+        it('should fail on null bucket', function (done) {
+          try {
+            client.putObject(null, 'hello', null, 1, '', function () {});
+          } catch (e) {
+            done();
+          }
+        });
+        it('should fail on empty bucket', function (done) {
+          try {
+            client.putObject(' \n \t ', 'hello', null, 1, '', function () {});
+          } catch (e) {
+            done();
+          }
+        });
+        it('should fail on empty bucket', function (done) {
+          try {
+            client.putObject('', 'hello', null, 1, '', function () {});
+          } catch (e) {
+            done();
+          }
+        });
+        it('should fail on null object', function (done) {
+          try {
+            client.putObject('hello', null, null, 1, '', function () {});
+          } catch (e) {
+            done();
+          }
+        });
+        it('should fail on empty object', function (done) {
+          try {
+            client.putObject('hello', '', null, 1, '', function () {});
+          } catch (e) {
+            done();
+          }
+        });
+      });
+      describe('with large objects using multipart', function () {
+        var uploadData = '';
+        for (var i = 0; i < 1024; i++) {
+          uploadData += 'a';
+        }
+        it('should put an object with no resume needed', function (done) {
+          MockResponse('http://localhost:9000').get('/bucket?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+          MockResponse('http://localhost:9000').get('/bucket?uploads&max-uploads=1000&prefix=object').reply(200, '<ListMultipartUploadsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Bucket>golang</Bucket><KeyMarker></KeyMarker><UploadIdMarker></UploadIdMarker><NextKeyMarker></NextKeyMarker><NextUploadIdMarker></NextUploadIdMarker><EncodingType></EncodingType><MaxUploads>1000</MaxUploads><IsTruncated>false</IsTruncated><Prefix></Prefix><Delimiter></Delimiter></ListMultipartUploadsResult>');
+          MockResponse('http://localhost:9000').post('/bucket/object?uploads').reply(200, '<?xml version="1.0" encoding="UTF-8"?>\n<InitiateMultipartUploadResult><Bucket>bucket</Bucket><Key>object</Key><UploadId>uploadid</UploadId></InitiateMultipartUploadResult>');
+          MockResponse('http://localhost:9000').put('/bucket/object?partNumber=1&uploadId=uploadid', function (body) {
+            return body.length === 5 * 1024 * 1024;
+          }).reply(200, '', {
+            etag: 'etag1'
+          });
+          MockResponse('http://localhost:9000').put('/bucket/object?partNumber=2&uploadId=uploadid', function (body) {
+            return body.length === 5 * 1024 * 1024;
+          }).reply(200, '', {
+            etag: 'etag2'
+          });
+          MockResponse('http://localhost:9000').put('/bucket/object?partNumber=3&uploadId=uploadid', function (body) {
+            return body.length === 1024 * 1024;
+          }).reply(200, '', {
+            etag: 'etag3'
+          });
+          MockResponse('http://localhost:9000').post('/bucket/object?uploadId=uploadid').reply(200, '<?xml version="1.0" encoding="UTF-8"?><CompleteMultipartUploadResult><Bucket>bucket</Bucket><Key>object</Key><Location>location</Location><ETag>"3858f62230ac3c915f300c664312c11f"</ETag></CompleteMultipartUploadResult>');
+          var s = new _stream2['default'].Readable();
+          s._read = function () {};
+          for (var i = 0; i < 11 * 1024; i++) {
+            s.push(uploadData);
+          }
+          s.push(null);
+          client.putObject('bucket', 'object', s, 11 * 1024 * 1024, '', done);
+        });
+        it('should resume an object upload', function (done) {
+          MockResponse('http://localhost:9000').get('/bucket?uploads&max-uploads=1000&prefix=object').reply(200, '<ListMultipartUploadsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Bucket>bucket</Bucket><KeyMarker></KeyMarker><UploadIdMarker></UploadIdMarker><NextKeyMarker></NextKeyMarker><NextUploadIdMarker></NextUploadIdMarker><EncodingType></EncodingType><MaxUploads>1000</MaxUploads><IsTruncated>false</IsTruncated><Upload><Key>object</Key><UploadId>uploadid</UploadId><Initiator><ID></ID><DisplayName></DisplayName></Initiator><Owner><ID></ID><DisplayName></DisplayName></Owner><StorageClass></StorageClass><Initiated>2015-05-30T14:43:35.349Z</Initiated></Upload><Prefix>object</Prefix><Delimiter></Delimiter></ListMultipartUploadsResult>');
+          MockResponse('http://localhost:9000').get('/bucket/object?uploadId=uploadid').reply(200, '<ListPartsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Bucket>bucket</Bucket><Key>go1.4.2</Key><UploadId>ntWSjzBytPT2xKLaMRonzXncsO10EH4Fc-Iq2-4hG-ulRYB</UploadId><Initiator><ID>minio</ID><DisplayName>minio</DisplayName></Initiator><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner><StorageClass>STANDARD</StorageClass><PartNumberMarker>0</PartNumberMarker><NextPartNumberMarker>0</NextPartNumberMarker><MaxParts>1000</MaxParts><IsTruncated>false</IsTruncated><Part><PartNumber>1</PartNumber><ETag>"79b281060d337b9b2b84ccf390adcf74"</ETag><LastModified>2015-06-03T03:12:34.756Z</LastModified><Size>5242880</Size></Part><Part><PartNumber>2</PartNumber><ETag>"79b281060d337b9b2b84ccf390adcf74"</ETag><LastModified>2015-06-03T03:12:34.756Z</LastModified><Size>5242880</Size></Part></ListPartsResult>');
+          MockResponse('http://localhost:9000').put('/bucket/object?partNumber=3&uploadId=uploadid', function (body) {
+            return body.length === 1024 * 1024;
+          }).reply(200, '', {
+            etag: '79b281060d337b9b2b84ccf390adcf74'
+          });
+          MockResponse('http://localhost:9000').post('/bucket/object?uploadId=uploadid').reply(200, '<?xml version="1.0" encoding="UTF-8"?><CompleteMultipartUploadResult><Bucket>bucket</Bucket><Key>object</Key><Location>location</Location><ETag>"3858f62230ac3c915f300c664312c11f"</ETag></CompleteMultipartUploadResult>');
+          var s = new _stream2['default'].Readable();
+          s._read = function () {};
+          for (var i = 0; i < 11 * 1024; i++) {
+            s.push(uploadData);
+          }
+          s.push(null);
+          client.putObject('bucket', 'object', s, 11 * 1024 * 1024, '', function (e) {
+            done(e);
+          });
+        });
+        it('should resume an object upload when uploaded data does not match, overwriting mismatching parts', function (done) {
+          MockResponse('http://localhost:9000').get('/bucket?uploads&max-uploads=1000&prefix=object').reply(200, '<ListMultipartUploadsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Bucket>bucket</Bucket><KeyMarker></KeyMarker><UploadIdMarker></UploadIdMarker><NextKeyMarker></NextKeyMarker><NextUploadIdMarker></NextUploadIdMarker><EncodingType></EncodingType><MaxUploads>1000</MaxUploads><IsTruncated>false</IsTruncated><Upload><Key>object</Key><UploadId>uploadid</UploadId><Initiator><ID></ID><DisplayName></DisplayName></Initiator><Owner><ID></ID><DisplayName></DisplayName></Owner><StorageClass></StorageClass><Initiated>2015-05-30T14:43:35.349Z</Initiated></Upload><Prefix>object</Prefix><Delimiter></Delimiter></ListMultipartUploadsResult>');
+          MockResponse('http://localhost:9000').get('/bucket/object?uploadId=uploadid').reply(200, '<ListPartsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Bucket>bucket</Bucket><Key>go1.4.2</Key><UploadId>ntWSjzBytPT2xKLaMRonzXncsO10EH4Fc-Iq2-4hG-ulRYB</UploadId><Initiator><ID>minio</ID><DisplayName>minio</DisplayName></Initiator><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner><StorageClass>STANDARD</StorageClass><PartNumberMarker>0</PartNumberMarker><NextPartNumberMarker>0</NextPartNumberMarker><MaxParts>1000</MaxParts><IsTruncated>false</IsTruncated><Part><PartNumber>1</PartNumber><ETag>"79b281060d337b9b2b84ccf390adcf74"</ETag><LastModified>2015-06-03T03:12:34.756Z</LastModified><Size>5242880</Size></Part><Part><PartNumber>2</PartNumber><ETag>"89b281060d337b9b2b84ccf390adcf74"</ETag><LastModified>2015-06-03T03:12:34.756Z</LastModified><Size>5242880</Size></Part></ListPartsResult>');
+          MockResponse('http://localhost:9000').put('/bucket/object?partNumber=2&uploadId=uploadid', function (body) {
+            return body.length === 5 * 1024 * 1024;
+          }).reply(200, '', {
+            etag: '79b281060d337b9b2b84ccf390adcf74'
+          });
+          MockResponse('http://localhost:9000').put('/bucket/object?partNumber=3&uploadId=uploadid', function (body) {
+            return body.length === 1024 * 1024;
+          }).reply(200, '', {
+            etag: '79b281060d337b9b2b84ccf390adcf74'
+          });
+          MockResponse('http://localhost:9000').post('/bucket/object?uploadId=uploadid').reply(200, '<?xml version="1.0" encoding="UTF-8"?><CompleteMultipartUploadResult><Bucket>bucket</Bucket><Key>object</Key><Location>location</Location><ETag>"3858f62230ac3c915f300c664312c11f"</ETag></CompleteMultipartUploadResult>');
+          var s = new _stream2['default'].Readable();
+          s._read = function () {};
+          for (var i = 0; i < 11 * 1024; i++) {
+            s.push(uploadData);
+          }
+          s.push(null);
+          client.putObject('bucket', 'object', s, 11 * 1024 * 1024, '', done);
+        });
+        it('should succeed if actual size is smaller than expected', function (done) {
+          MockResponse('http://localhost:9000').get('/bucket?uploads&max-uploads=1000&prefix=object').reply(200, '<ListMultipartUploadsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Bucket>golang</Bucket><KeyMarker></KeyMarker><UploadIdMarker></UploadIdMarker><NextKeyMarker></NextKeyMarker><NextUploadIdMarker></NextUploadIdMarker><EncodingType></EncodingType><MaxUploads>1000</MaxUploads><IsTruncated>false</IsTruncated><Prefix></Prefix><Delimiter></Delimiter></ListMultipartUploadsResult>');
+          MockResponse('http://localhost:9000').post('/bucket/object?uploads').reply(200, '<?xml version="1.0" encoding="UTF-8"?>\n<InitiateMultipartUploadResult><Bucket>bucket</Bucket><Key>object</Key><UploadId>uploadid</UploadId></InitiateMultipartUploadResult>');
+          MockResponse('http://localhost:9000').put('/bucket/object?partNumber=1&uploadId=uploadid', function (body) {
+            return body.length === 5 * 1024 * 1024;
+          }).reply(200, '', {
+            etag: 'etag1'
+          });
+          MockResponse('http://localhost:9000').put('/bucket/object?partNumber=2&uploadId=uploadid', function (body) {
+            return body.length === 5 * 1024 * 1024;
+          }).reply(200, '', {
+            etag: 'etag2'
+          });
+          MockResponse('http://localhost:9000').put('/bucket/object?partNumber=3&uploadId=uploadid', function (body) {
+            return body.length === 1 * 1024 * 1024;
+          }).reply(200, '', {
+            etag: 'etag3'
+          });
+          MockResponse('http://localhost:9000').post('/bucket/object?uploadId=uploadid').reply(200, '<?xml version="1.0" encoding="UTF-8"?><CompleteMultipartUploadResult><Bucket>bucket</Bucket><Key>object</Key><Location>location</Location><ETag>"3858f62230ac3c915f300c664312c11f"</ETag></CompleteMultipartUploadResult>');
+          var s = new _stream2['default'].Readable();
+          s._read = function () {};
+          for (var i = 0; i < 11 * 1024; i++) {
+            s.push(uploadData);
+          }
+          s.push(null);
+          client.putObject('bucket', 'object', s, 12 * 1024 * 1024, '', done);
+        });
+        it('should succeed if actual size is larger than expected', function (done) {
+          MockResponse('http://localhost:9000').get('/bucket?uploads&max-uploads=1000&prefix=object').reply(200, '<ListMultipartUploadsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Bucket>golang</Bucket><KeyMarker></KeyMarker><UploadIdMarker></UploadIdMarker><NextKeyMarker></NextKeyMarker><NextUploadIdMarker></NextUploadIdMarker><EncodingType></EncodingType><MaxUploads>1000</MaxUploads><IsTruncated>false</IsTruncated><Prefix></Prefix><Delimiter></Delimiter></ListMultipartUploadsResult>');
+          MockResponse('http://localhost:9000').post('/bucket/object?uploads').reply(200, '<?xml version="1.0" encoding="UTF-8"?>\n<InitiateMultipartUploadResult><Bucket>bucket</Bucket><Key>object</Key><UploadId>uploadid</UploadId></InitiateMultipartUploadResult>');
+          MockResponse('http://localhost:9000').put('/bucket/object?partNumber=1&uploadId=uploadid', function (body) {
+            return body.length === 5 * 1024 * 1024;
+          }).reply(200, '', {
+            etag: 'etag1'
+          });
+          MockResponse('http://localhost:9000').put('/bucket/object?partNumber=2&uploadId=uploadid', function (body) {
+            return body.length === 5 * 1024 * 1024;
+          }).reply(200, '', {
+            etag: 'etag2'
+          });
+          MockResponse('http://localhost:9000').put('/bucket/object?partNumber=3&uploadId=uploadid', function (body) {
+            return body.length === 2 * 1024 * 1024;
+          }).reply(200, '', {
+            etag: 'etag3'
+          });
+          MockResponse('http://localhost:9000').post('/bucket/object?uploadId=uploadid').reply(200, '<?xml version="1.0" encoding="UTF-8"?><CompleteMultipartUploadResult><Bucket>bucket</Bucket><Key>object</Key><Location>location</Location><ETag>"3858f62230ac3c915f300c664312c11f"</ETag></CompleteMultipartUploadResult>');
+          var s = new _stream2['default'].Readable();
+          s._read = function () {};
+          for (var i = 0; i < 12 * 1024; i++) {
+            s.push(uploadData);
+          }
+          s.push(null);
+          client.putObject('bucket', 'object', s, 11 * 1024 * 1024, '', function (e) {
+            _chai.assert.equal(e, null);
+            done();
+          });
+        });
+        it('should pass upload list error to callback', function (done) {
+          MockResponse('http://localhost:9000').get('/bucket?uploads&max-uploads=1000&prefix=object').reply(400, generateError('code', 'message', 'requestid', 'hostid', 'resource'));
+          var s = new _stream2['default'].Readable();
+          s._read = function () {};
+          for (var i = 0; i < 11 * 1024; i++) {
+            s.push(uploadData);
+          }
+          s.push(null);
+          client.putObject('bucket', 'object', s, 11 * 1024 * 1024, '', checkError('code', 'message', 'requestid', 'hostid', 'resource', done));
+        });
+        it('should pass part list error to callback', function (done) {
+          MockResponse('http://localhost:9000').get('/bucket?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+          MockResponse('http://localhost:9000').get('/bucket?uploads&max-uploads=1000&prefix=object').reply(200, '<ListMultipartUploadsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Bucket>bucket</Bucket><KeyMarker></KeyMarker><UploadIdMarker></UploadIdMarker><NextKeyMarker></NextKeyMarker><NextUploadIdMarker></NextUploadIdMarker><EncodingType></EncodingType><MaxUploads>1000</MaxUploads><IsTruncated>false</IsTruncated><Upload><Key>object</Key><UploadId>uploadid</UploadId><Initiator><ID></ID><DisplayName></DisplayName></Initiator><Owner><ID></ID><DisplayName></DisplayName></Owner><StorageClass></StorageClass><Initiated>2015-05-30T14:43:35.349Z</Initiated></Upload><Prefix>object</Prefix><Delimiter></Delimiter></ListMultipartUploadsResult>');
+          MockResponse('http://localhost:9000').get('/bucket/object?uploadId=uploadid').reply(400, generateError('code', 'message', 'requestid', 'hostid', 'resource'));
+          var s = new _stream2['default'].Readable();
+          s._read = function () {};
+          for (var i = 0; i < 11 * 1024; i++) {
+            s.push(uploadData);
+          }
+          s.push(null);
+          client.putObject('bucket', 'object', s, 11 * 1024 * 1024, '', checkError('code', 'message', 'requestid', 'hostid', 'resource', done));
+        });
+        it('should pass put error to callback', function (done) {
+          MockResponse('http://localhost:9000').get('/bucket?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+          MockResponse('http://localhost:9000').get('/bucket?uploads&max-uploads=1000&prefix=object').reply(200, '<ListMultipartUploadsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Bucket>bucket</Bucket><KeyMarker></KeyMarker><UploadIdMarker></UploadIdMarker><NextKeyMarker></NextKeyMarker><NextUploadIdMarker></NextUploadIdMarker><EncodingType></EncodingType><MaxUploads>1000</MaxUploads><IsTruncated>false</IsTruncated><Upload><Key>object</Key><UploadId>uploadid</UploadId><Initiator><ID></ID><DisplayName></DisplayName></Initiator><Owner><ID></ID><DisplayName></DisplayName></Owner><StorageClass></StorageClass><Initiated>2015-05-30T14:43:35.349Z</Initiated></Upload><Prefix>object</Prefix><Delimiter></Delimiter></ListMultipartUploadsResult>');
+          MockResponse('http://localhost:9000').get('/bucket/object?uploadId=uploadid').reply(200, '<ListPartsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Bucket>bucket</Bucket><Key>go1.4.2</Key><UploadId>ntWSjzBytPT2xKLaMRonzXncsO10EH4Fc-Iq2-4hG-ulRYB</UploadId><Initiator><ID>minio</ID><DisplayName>minio</DisplayName></Initiator><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner><StorageClass>STANDARD</StorageClass><PartNumberMarker>0</PartNumberMarker><NextPartNumberMarker>0</NextPartNumberMarker><MaxParts>1000</MaxParts><IsTruncated>false</IsTruncated><Part><PartNumber>1</PartNumber><ETag>"79b281060d337b9b2b84ccf390adcf74"</ETag><LastModified>2015-06-03T03:12:34.756Z</LastModified><Size>5242880</Size></Part><Part><PartNumber>2</PartNumber><ETag>"79b281060d337b9b2b84ccf390adcf74"</ETag><LastModified>2015-06-03T03:12:34.756Z</LastModified><Size>5242880</Size></Part></ListPartsResult>');
+          MockResponse('http://localhost:9000').put('/bucket/object?partNumber=3&uploadId=uploadid', function (body) {
+            return body.length === 1024 * 1024;
+          }).reply(400, generateError('code', 'message', 'requestid', 'hostid', 'resource'));
+          var s = new _stream2['default'].Readable();
+          s._read = function () {};
+          for (var i = 0; i < 11 * 1024; i++) {
+            s.push(uploadData);
+          }
+          s.push(null);
+          client.putObject('bucket', 'object', s, 11 * 1024 * 1024, '', checkError('code', 'message', 'requestid', 'hostid', 'resource', done));
+        });
+        it('should pass complete upload error to callback', function (done) {
+          MockResponse('http://localhost:9000').get('/bucket?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+          MockResponse('http://localhost:9000').get('/bucket?uploads&max-uploads=1000&prefix=object').reply(200, '<ListMultipartUploadsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Bucket>bucket</Bucket><KeyMarker></KeyMarker><UploadIdMarker></UploadIdMarker><NextKeyMarker></NextKeyMarker><NextUploadIdMarker></NextUploadIdMarker><EncodingType></EncodingType><MaxUploads>1000</MaxUploads><IsTruncated>false</IsTruncated><Upload><Key>object</Key><UploadId>uploadid</UploadId><Initiator><ID></ID><DisplayName></DisplayName></Initiator><Owner><ID></ID><DisplayName></DisplayName></Owner><StorageClass></StorageClass><Initiated>2015-05-30T14:43:35.349Z</Initiated></Upload><Prefix>object</Prefix><Delimiter></Delimiter></ListMultipartUploadsResult>');
+          MockResponse('http://localhost:9000').get('/bucket/object?uploadId=uploadid').reply(200, '<ListPartsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Bucket>bucket</Bucket><Key>go1.4.2</Key><UploadId>ntWSjzBytPT2xKLaMRonzXncsO10EH4Fc-Iq2-4hG-ulRYB</UploadId><Initiator><ID>minio</ID><DisplayName>minio</DisplayName></Initiator><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner><StorageClass>STANDARD</StorageClass><PartNumberMarker>0</PartNumberMarker><NextPartNumberMarker>0</NextPartNumberMarker><MaxParts>1000</MaxParts><IsTruncated>false</IsTruncated><Part><PartNumber>1</PartNumber><ETag>"79b281060d337b9b2b84ccf390adcf74"</ETag><LastModified>2015-06-03T03:12:34.756Z</LastModified><Size>5242880</Size></Part><Part><PartNumber>2</PartNumber><ETag>"79b281060d337b9b2b84ccf390adcf74"</ETag><LastModified>2015-06-03T03:12:34.756Z</LastModified><Size>5242880</Size></Part></ListPartsResult>');
+          MockResponse('http://localhost:9000').put('/bucket/object?partNumber=3&uploadId=uploadid', function (body) {
+            return body.length === 1024 * 1024;
+          }).reply(200, '', {
+            etag: '79b281060d337b9b2b84ccf390adcf74'
+          });
+          MockResponse('http://localhost:9000').post('/bucket/object?uploadId=uploadid').reply(400, generateError('code', 'message', 'requestid', 'hostid', 'resource'));
+          var s = new _stream2['default'].Readable();
+          s._read = function () {};
+          for (var i = 0; i < 11 * 1024; i++) {
+            s.push(uploadData);
+          }
+          s.push(null);
+          client.putObject('bucket', 'object', s, 11 * 1024 * 1024, '', checkError('code', 'message', 'requestid', 'hostid', 'resource', done));
+        });
+      });
+    });
+
+    describe('#removeAllBucketNotification()', function () {
+      it('should error on invalid arguments', function () {
+        _chai.assert.throws(function () {
+          client.removeAllBucketNotification('ab', function () {}, function () {});
+        }, /Invalid bucket name/);
+      });
+      it('remove all bucket notifications', function (done) {
+        MockResponse('http://localhost:9000').get('/bucket?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+        MockResponse('http://localhost:9000').put('/bucket?notification').reply(200, '');
+        client.removeAllBucketNotification('bucket', function (e) {
+          _chai.assert.equal(e, null);
+          done();
+        });
+      });
+    });
+
+    describe('#setBucketNotification()', function () {
+      it('should error on invalid arguments', function () {
+        _chai.assert.throws(function () {
+          client.setBucketNotification('ab', function () {});
+        }, /Invalid bucket name/);
+        _chai.assert.throws(function () {
+          client.setBucketNotification('bucket', 49, function () {});
+        }, /notification config should be of type "Object"/);
+      });
+      it('set a bucket notification', function (done) {
+        MockResponse('http://localhost:9000').put('/bucket?notification').reply(200, '');
+
+        var config = new Minio.NotificationConfig();
+        var arn = Minio.buildARN('aws', 'sns', 'us-west-2', 408065444917, 'TestTopic');
+        var topic = new Minio.TopicConfig(arn);
+
+        topic.addFilterSuffix('.jpg');
+        topic.addFilterPrefix('myphotos/');
+        topic.addEvent(Minio.ObjectCreatedAll);
+
+        config.add(topic);
+
+        client.setBucketNotification('bucket', config, function (e) {
+          _chai.assert.equal(e, null);
+          done();
+        });
+      });
+    });
+
+    describe('#getBucketNotification()', function () {
+      it('should error on invalid arguments', function () {
+        _chai.assert.throws(function () {
+          client.getBucketNotification('ab', function () {});
+        }, /Invalid bucket name/);
+      });
+      it('get and parse a bucket notification response', function (done) {
+        MockResponse('http://localhost:9000').get('/bucket?notification').reply(200, '<NotificationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TopicConfiguration><Id>YjVkM2Y0YmUtNGI3NC00ZjQyLWEwNGItNDIyYWUxY2I0N2M4</Id><Topic>arn:aws:sns:us-east-1:83310034:s3notificationtopic2</Topic><Event>s3:ReducedRedundancyLostObject</Event><Event>s3:ObjectCreated:*</Event><Filter><S3Key><FilterRule><Name>suffix</Name><Value>.jpg</Value></FilterRule><FilterRule><Name>prefix</Name><Value>photos/</Value></FilterRule></S3Key></Filter></TopicConfiguration><QueueConfiguration><Id>ZjVkM2Y0YmUtNGI3NC00ZjQyLWEwNGItNDIyYWUxY2I0N2M4</Id><Queue>arn:aws:sns:us-east-1:83310034:s3notificationqueue2</Queue><Event>s3:ReducedRedundancyLostObject</Event><Event>s3:ObjectCreated:*</Event></QueueConfiguration></NotificationConfiguration>');
+        client.getBucketNotification('bucket', function (e, bucketNotification) {
+          var expectedResults = {
+            TopicConfiguration: [{ Id: 'YjVkM2Y0YmUtNGI3NC00ZjQyLWEwNGItNDIyYWUxY2I0N2M4', Topic: 'arn:aws:sns:us-east-1:83310034:s3notificationtopic2', Event: ['s3:ReducedRedundancyLostObject', 's3:ObjectCreated:*'], Filter: [{ Name: 'suffix', Value: '.jpg' }, { Name: 'prefix', Value: 'photos/' }] }],
+            QueueConfiguration: [{ Id: 'ZjVkM2Y0YmUtNGI3NC00ZjQyLWEwNGItNDIyYWUxY2I0N2M4', Queue: 'arn:aws:sns:us-east-1:83310034:s3notificationqueue2', Event: ['s3:ReducedRedundancyLostObject', 's3:ObjectCreated:*'], Filter: [] }],
+            CloudFunctionConfiguration: [] };
+          _chai.assert.deepEqual(bucketNotification, expectedResults);
+          done();
+        });
+      });
+    });
+
+    describe('#listenBucketNotification', function () {
+      it('should error on invalid arguments', function () {
+        _chai.assert.throws(function () {
+          client.listenBucketNotification('ab', 'prefix', 'suffix', ['events']);
+        }, /Invalid bucket name/);
+        _chai.assert.throws(function () {
+          client.listenBucketNotification('bucket', {}, 'suffix', ['events']);
+        }, /prefix must be of type string/);
+        _chai.assert.throws(function () {
+          client.listenBucketNotification('bucket', '', {}, ['events']);
+        }, /suffix must be of type string/);
+        _chai.assert.throws(function () {
+          client.listenBucketNotification('bucket', '', '', {});
+        }, /events must be of type Array/);
+      });
+    });
+
+    describe('#listObjects()', function () {
+      it('should iterate without a prefix', function (done) {
+        MockResponse('http://localhost:9000').get('/bucket?max-keys=1000').reply(200, '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Name>bucket</Name><Prefix></Prefix><Marker></Marker><MaxKeys>1000</MaxKeys><Delimiter></Delimiter><IsTruncated>true</IsTruncated><Contents><Key>key1</Key><LastModified>2015-05-05T02:21:15.716Z</LastModified><ETag>"5eb63bbbe01eeed093cb22bb8f5acdc3"</ETag><Size>11</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents><Contents><Key>key2</Key><LastModified>2015-05-05T20:36:17.498Z</LastModified><ETag>"2a60eaffa7a82804bdc682ce1df6c2d4"</ETag><Size>1661</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents></ListBucketResult>');
+        MockResponse('http://localhost:9000').get('/bucket?marker=key2&max-keys=1000').reply(200, '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Name>bucket</Name><Prefix></Prefix><Marker></Marker><MaxKeys>1000</MaxKeys><Delimiter></Delimiter><IsTruncated>true</IsTruncated><Contents><Key>key3</Key><LastModified>2015-05-05T02:21:15.716Z</LastModified><ETag>"5eb63bbbe01eeed093cb22bb8f5acdc3"</ETag><Size>11</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents><Contents><Key>key4</Key><LastModified>2015-05-05T20:36:17.498Z</LastModified><ETag>"2a60eaffa7a82804bdc682ce1df6c2d4"</ETag><Size>1661</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents></ListBucketResult>');
+        MockResponse('http://localhost:9000').get('/bucket?marker=key4&max-keys=1000').reply(200, '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Name>bucket</Name><Prefix></Prefix><Marker></Marker><MaxKeys>1000</MaxKeys><Delimiter></Delimiter><IsTruncated>false</IsTruncated><Contents><Key>key5</Key><LastModified>2015-05-05T02:21:15.716Z</LastModified><ETag>"5eb63bbbe01eeed093cb22bb8f5acdc3"</ETag><Size>11</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents><Contents><Key>key6</Key><LastModified>2015-05-05T20:36:17.498Z</LastModified><ETag>"2a60eaffa7a82804bdc682ce1df6c2d4"</ETag><Size>1661</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents></ListBucketResult>');
+        var stream = client.listObjects('bucket', '', true),
+            results = [],
+            expectedResults = [{
+          'etag': '5eb63bbbe01eeed093cb22bb8f5acdc3',
+          'lastModified': new Date('2015-05-05T02:21:15.716Z'),
+          'name': 'key1',
+          'size': 11
+        }, {
+          'etag': '2a60eaffa7a82804bdc682ce1df6c2d4',
+          'lastModified': new Date('2015-05-05T20:36:17.498Z'),
+          'name': 'key2',
+          'size': 1661
+        }, {
+          'etag': '5eb63bbbe01eeed093cb22bb8f5acdc3',
+          'lastModified': new Date('2015-05-05T02:21:15.716Z'),
+          'name': 'key3',
+          'size': 11
+        }, {
+          'etag': '2a60eaffa7a82804bdc682ce1df6c2d4',
+          'lastModified': new Date('2015-05-05T20:36:17.498Z'),
+          'name': 'key4',
+          'size': 1661
+        }, {
+          'etag': '5eb63bbbe01eeed093cb22bb8f5acdc3',
+          'lastModified': new Date('2015-05-05T02:21:15.716Z'),
+          'name': 'key5',
+          'size': 11
+        }, {
+          'etag': '2a60eaffa7a82804bdc682ce1df6c2d4',
+          'lastModified': new Date('2015-05-05T20:36:17.498Z'),
+          'name': 'key6',
+          'size': 1661
+        }];
+        stream.pipe(_through22['default'].obj(function (object, enc, end) {
+          results.push(object);
+          end();
+        }, function (end) {
+          _chai.assert.deepEqual(results, expectedResults);
+          end();
+          done();
+        }));
+      });
+      it('should iterate with a prefix', function (done) {
+        MockResponse('http://localhost:9000').get('/bucket?max-keys=1000&prefix=key').reply(200, '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Name>bucket</Name><Prefix></Prefix><Marker></Marker><MaxKeys>1000</MaxKeys><Delimiter></Delimiter><IsTruncated>true</IsTruncated><Contents><Key>key1</Key><LastModified>2015-05-05T02:21:15.716Z</LastModified><ETag>"5eb63bbbe01eeed093cb22bb8f5acdc3"</ETag><Size>11</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents><Contents><Key>key2</Key><LastModified>2015-05-05T20:36:17.498Z</LastModified><ETag>"2a60eaffa7a82804bdc682ce1df6c2d4"</ETag><Size>1661</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents></ListBucketResult>');
+        MockResponse('http://localhost:9000').get('/bucket?marker=key2&max-keys=1000&prefix=key').reply(200, '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Name>bucket</Name><Prefix></Prefix><Marker></Marker><MaxKeys>1000</MaxKeys><Delimiter></Delimiter><IsTruncated>true</IsTruncated><Contents><Key>key3</Key><LastModified>2015-05-05T02:21:15.716Z</LastModified><ETag>"5eb63bbbe01eeed093cb22bb8f5acdc3"</ETag><Size>11</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents><Contents><Key>key4</Key><LastModified>2015-05-05T20:36:17.498Z</LastModified><ETag>"2a60eaffa7a82804bdc682ce1df6c2d4"</ETag><Size>1661</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents></ListBucketResult>');
+        MockResponse('http://localhost:9000').get('/bucket?marker=key4&max-keys=1000&prefix=key').reply(200, '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Name>bucket</Name><Prefix></Prefix><Marker></Marker><MaxKeys>1000</MaxKeys><Delimiter></Delimiter><IsTruncated>false</IsTruncated><Contents><Key>key5</Key><LastModified>2015-05-05T02:21:15.716Z</LastModified><ETag>"5eb63bbbe01eeed093cb22bb8f5acdc3"</ETag><Size>11</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents><Contents><Key>key6</Key><LastModified>2015-05-05T20:36:17.498Z</LastModified><ETag>"2a60eaffa7a82804bdc682ce1df6c2d4"</ETag><Size>1661</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents></ListBucketResult>');
+        var stream = client.listObjects('bucket', 'key', true),
+            results = [],
+            expectedResults = [{
+          'etag': '5eb63bbbe01eeed093cb22bb8f5acdc3',
+          'lastModified': new Date('2015-05-05T02:21:15.716Z'),
+          'name': 'key1',
+          'size': 11
+        }, {
+          'etag': '2a60eaffa7a82804bdc682ce1df6c2d4',
+          'lastModified': new Date('2015-05-05T20:36:17.498Z'),
+          'name': 'key2',
+          'size': 1661
+        }, {
+          'etag': '5eb63bbbe01eeed093cb22bb8f5acdc3',
+          'lastModified': new Date('2015-05-05T02:21:15.716Z'),
+          'name': 'key3',
+          'size': 11
+        }, {
+          'etag': '2a60eaffa7a82804bdc682ce1df6c2d4',
+          'lastModified': new Date('2015-05-05T20:36:17.498Z'),
+          'name': 'key4',
+          'size': 1661
+        }, {
+          'etag': '5eb63bbbe01eeed093cb22bb8f5acdc3',
+          'lastModified': new Date('2015-05-05T02:21:15.716Z'),
+          'name': 'key5',
+          'size': 11
+        }, {
+          'etag': '2a60eaffa7a82804bdc682ce1df6c2d4',
+          'lastModified': new Date('2015-05-05T20:36:17.498Z'),
+          'name': 'key6',
+          'size': 1661
+        }];
+        stream.pipe(_through22['default'].obj(function (object, enc, end) {
+          results.push(object);
+          end();
+        }, function (end) {
+          _chai.assert.deepEqual(results, expectedResults);
+          end();
+          done();
+        }));
+      });
+      it.skip('should iterate with recursion', function (done) {
+        MockResponse('http://localhost:9000').get('/bucket?max-keys=1000').reply(200, '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Name>bucket</Name><Prefix></Prefix><Marker></Marker><MaxKeys>1000</MaxKeys><Delimiter></Delimiter><IsTruncated>true</IsTruncated><Contents><Key>key1</Key><LastModified>2015-05-05T02:21:15.716Z</LastModified><ETag>"5eb63bbbe01eeed093cb22bb8f5acdc3"</ETag><Size>11</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents><Contents><Key>key2</Key><LastModified>2015-05-05T20:36:17.498Z</LastModified><ETag>"2a60eaffa7a82804bdc682ce1df6c2d4"</ETag><Size>1661</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents></ListBucketResult>');
+        MockResponse('http://localhost:9000').get('/bucket?marker=key2&max-keys=1000').reply(200, '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Name>bucket</Name><Prefix></Prefix><Marker></Marker><MaxKeys>1000</MaxKeys><Delimiter></Delimiter><IsTruncated>true</IsTruncated><Contents><Key>key3</Key><LastModified>2015-05-05T02:21:15.716Z</LastModified><ETag>"5eb63bbbe01eeed093cb22bb8f5acdc3"</ETag><Size>11</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents><Contents><Key>key4</Key><LastModified>2015-05-05T20:36:17.498Z</LastModified><ETag>"2a60eaffa7a82804bdc682ce1df6c2d4"</ETag><Size>1661</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents></ListBucketResult>');
+        MockResponse('http://localhost:9000').get('/bucket?marker=key4&max-keys=1000').reply(200, '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Name>bucket</Name><Prefix></Prefix><Marker></Marker><MaxKeys>1000</MaxKeys><Delimiter></Delimiter><IsTruncated>false</IsTruncated><Contents><Key>key5</Key><LastModified>2015-05-05T02:21:15.716Z</LastModified><ETag>"5eb63bbbe01eeed093cb22bb8f5acdc3"</ETag><Size>11</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents><Contents><Key>key6</Key><LastModified>2015-05-05T20:36:17.498Z</LastModified><ETag>"2a60eaffa7a82804bdc682ce1df6c2d4"</ETag><Size>1661</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents></ListBucketResult>');
+        var stream = client.listObjects('bucket', '', true),
+            results = [],
+            expectedResults = [{
+          'etag': '5eb63bbbe01eeed093cb22bb8f5acdc3',
+          'lastModified': '2015-05-05T02:21:15.716Z',
+          'name': 'key1',
+          'size': 11
+        }, {
+          'etag': '2a60eaffa7a82804bdc682ce1df6c2d4',
+          'lastModified': '2015-05-05T20:36:17.498Z',
+          'name': 'key2',
+          'size': 1661
+        }, {
+          'etag': '5eb63bbbe01eeed093cb22bb8f5acdc3',
+          'lastModified': '2015-05-05T02:21:15.716Z',
+          'name': 'key3',
+          'size': 11
+        }, {
+          'etag': '2a60eaffa7a82804bdc682ce1df6c2d4',
+          'lastModified': '2015-05-05T20:36:17.498Z',
+          'name': 'key4',
+          'size': 1661
+        }, {
+          'etag': '5eb63bbbe01eeed093cb22bb8f5acdc3',
+          'lastModified': '2015-05-05T02:21:15.716Z',
+          'name': 'key5',
+          'size': 11
+        }, {
+          'etag': '2a60eaffa7a82804bdc682ce1df6c2d4',
+          'lastModified': '2015-05-05T20:36:17.498Z',
+          'name': 'key6',
+          'size': 1661
+        }];
+        stream.pipe(_through22['default'].obj(function (object, enc, end) {
+          results.push(object);
+          end();
+        }, function (end) {
+          _chai.assert.deepEqual(results, expectedResults);
+          end();
+          done();
+        }));
+      });
+      it('should pass error on stream', function (done) {
+        MockResponse('http://localhost:9000').filteringPath(function () {
+          return '/bucket';
+        }).get('/bucket').reply(400, generateError('code', 'message', 'requestid', 'hostid', '/bucket'));
+        var stream = client.listObjects('bucket');
+        stream.pipe(_through22['default'].obj(function (part, enc, end) {
+          end();
+        }, function (end) {
+          end();
+        }));
+        stream.on('error', checkError('code', 'message', 'requestid', 'hostid', '/bucket', done));
+      });
+      it('should pass error in stream on subsequent error', function (done) {
+        MockResponse('http://localhost:9000').get('/bucket?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+        MockResponse('http://localhost:9000').filteringPath(function () {
+          return '/bucket';
+        }).get('/bucket').reply(200, '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Name>bucket</Name><Prefix></Prefix><Marker></Marker><MaxKeys>1000</MaxKeys><Delimiter></Delimiter><IsTruncated>true</IsTruncated><Contents><Key>key1</Key><LastModified>2015-05-05T02:21:15.716Z</LastModified><ETag>"5eb63bbbe01eeed093cb22bb8f5acdc3"</ETag><Size>11</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents><Contents><Key>key2</Key><LastModified>2015-05-05T20:36:17.498Z</LastModified><ETag>"2a60eaffa7a82804bdc682ce1df6c2d4"</ETag><Size>1661</Size><StorageClass>STANDARD</StorageClass><Owner><ID>minio</ID><DisplayName>minio</DisplayName></Owner></Contents></ListBucketResult>');
+        MockResponse('http://localhost:9000').filteringPath(function () {
+          return '/bucket';
+        }).get('/bucket').reply(400, generateError('code', 'message', 'requestid', 'hostid', '/bucket'));
+        var stream = client.listObjects('bucket');
+        stream.pipe(_through22['default'].obj(function (part, enc, end) {
+          end();
+        }, function (end) {
+          end();
+        }));
+        stream.on('error', checkError('code', 'message', 'requestid', 'hostid', '/bucket', done));
+      });
+    });
+
+    describe('#listObjectsV2()', function () {
+      it('should iterate with a truncated flag', function (done) {
+        MockResponse('http://localhost:9000').get('/bucket?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+        MockResponse('http://localhost:9000').get('/bucket?list-type=2&max-keys=1000').reply(200, '<?xml version="1.0" encoding="UTF-8"?><ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Name>bucket</Name><Prefix></Prefix><KeyCount>7</KeyCount><MaxKeys>1000</MaxKeys><Delimiter>/</Delimiter><IsTruncated>true</IsTruncated><NextContinuationToken>6b9d1e3d20436</NextContinuationToken><Contents><Key>7mb.bin</Key><LastModified>2016-07-17T07:21:54.000Z</LastModified><ETag>&quot;67dc7f4b9253ab418a9f7fbc4282432a-2&quot;</ETag><Size>7340032</Size><StorageClass>STANDARD</StorageClass></Contents></ListBucketResult>');
+        MockResponse('http://localhost:9000').get('/bucket?continuation-token=6b9d1e3d20436&list-type=2&max-keys=1000').reply(200, '<?xml version="1.0" encoding="UTF-8"?><ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Name>bucket</Name><Prefix></Prefix><KeyCount>7</KeyCount><MaxKeys>1000</MaxKeys><Delimiter>/</Delimiter><IsTruncated>false</IsTruncated><Contents><Key>hosts</Key><LastModified>2016-07-15T11:46:53.000Z</LastModified><ETag>&quot;2bb4dbc9f2171fcd060366f4ea235c1c&quot;</ETag><Size>220</Size><StorageClass>STANDARD</StorageClass></Contents><Contents><Key>main.go</Key><LastModified>2016-07-19T10:29:14.000Z</LastModified><ETag>&quot;16c5f5a9817b6b9d1e3d204366a22f96&quot;</ETag><Size>8231</Size><StorageClass>STANDARD</StorageClass></Contents><CommonPrefixes><Prefix>1100/</Prefix></CommonPrefixes><CommonPrefixes><Prefix>caddy/</Prefix></CommonPrefixes><CommonPrefixes><Prefix>hosts/</Prefix></CommonPrefixes><CommonPrefixes><Prefix>uploads/</Prefix></CommonPrefixes></ListBucketResult>');
+        var stream = client.listObjectsV2('bucket', '', true),
+            results = [],
+            expectedResults = [{
+          'etag': '67dc7f4b9253ab418a9f7fbc4282432a-2',
+          'lastModified': new Date('2016-07-17T07:21:54.000Z'),
+          'name': '7mb.bin',
+          'size': 7340032 }, { 'etag': '2bb4dbc9f2171fcd060366f4ea235c1c',
+          'lastModified': new Date('2016-07-15T11:46:53.000Z'),
+          'name': 'hosts',
+          'size': 220 }, { 'etag': '16c5f5a9817b6b9d1e3d204366a22f96',
+          'lastModified': new Date('2016-07-19T10:29:14.000Z'),
+          'name': 'main.go',
+          'size': 8231 }, { 'prefix': '1100/',
+          'size': 0 }, { 'prefix': 'caddy/',
+          'size': 0 }, { 'prefix': 'hosts/',
+          'size': 0 }, { 'prefix': 'uploads/',
+          'size': 0
+        }];
+        stream.pipe(_through22['default'].obj(function (object, enc, end) {
+          results.push(object);
+          end();
+        }, function (end) {
+          _chai.assert.deepEqual(results, expectedResults);
+          end();
+          done();
+        }));
+      });
+    });
+
+    describe('#statObject(bucket, object, callback)', function () {
+      it('should retrieve object metadata', function (done) {
+        MockResponse('http://localhost:9000').head('/bucket/object').reply(200, '', {
+          'ETag': 'etag',
+          'Content-Length': 11,
+          'Last-Modified': 'lastmodified',
+          'Content-Type': 'text/plain'
+        });
+        client.statObject('bucket', 'object', function (e, r) {
+          _chai.assert.deepEqual(r, {
+            size: 11,
+            lastModified: 'lastmodified',
+            etag: 'etag',
+            contentType: 'text/plain'
+          });
+          done();
+        });
+      });
+      it('should pass error to callback', function (done) {
+        MockResponse('http://localhost:9000').head('/bucket/object').reply(400, generateError('code', 'message', 'requestid', 'hostid', 'resource'));
+
+        client.statObject('bucket', 'object', checkError('code', 'message', 'requestid', 'hostid', 'resource', done));
+      });
+      it('should fail on null bucket', function (done) {
+        try {
+          client.statObject(null, 'hello', function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on empty bucket', function (done) {
+        try {
+          client.statObject('', 'hello', function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on empty bucket', function (done) {
+        try {
+          client.statObject('  \n  \t  ', 'hello', function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on null object', function (done) {
+        try {
+          client.statObject('hello', null, function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on empty object', function (done) {
+        try {
+          client.statObject('hello', '', function () {});
+        } catch (e) {
+          done();
+        }
+      });
+    });
+
+    describe('#removeObject(bucket, object, callback)', function () {
+      it('should delete an object', function (done) {
+        MockResponse('http://localhost:9000').get('/bucket?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+        MockResponse('http://localhost:9000')['delete']('/bucket/object').reply(204);
+        client.removeObject('bucket', 'object', function (e) {
+          _chai.assert.equal(e, null);
+          done();
+        });
+      });
+      it('should pass error to callback', function (done) {
+        MockResponse('http://localhost:9000')['delete']('/bucket/object').reply(400, generateError('code', 'message', 'requestid', 'hostid', 'resource'));
+        client.removeObject('bucket', 'object', checkError('code', 'message', 'requestid', 'hostid', 'resource', done));
+      });
+      it('should fail on null bucket', function (done) {
+        try {
+          client.removeObject(null, 'hello', function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on empty bucket', function (done) {
+        try {
+          client.removeObject('', 'hello', function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on empty bucket', function (done) {
+        try {
+          client.removeObject('  \n  \t  ', 'hello', function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on null object', function (done) {
+        try {
+          client.removeObject('hello', null, function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on empty object', function (done) {
+        try {
+          client.removeObject('hello', '', function () {});
+        } catch (e) {
+          done();
+        }
+      });
+    });
+
+    describe('#removeIncompleteUpload(bucket, object, callback)', function () {
+      it('should remove an incomplete upload', function (done) {
+        MockResponse('http://localhost:9000').get('/golang?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+        MockResponse('http://localhost:9000').get('/golang?uploads&max-uploads=1000&prefix=go1.4.2').reply(200, '<ListMultipartUploadsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Bucket>golang</Bucket><KeyMarker></KeyMarker><UploadIdMarker></UploadIdMarker><NextKeyMarker>keymarker</NextKeyMarker><NextUploadIdMarker>uploadmarker</NextUploadIdMarker><EncodingType></EncodingType><MaxUploads>1000</MaxUploads><IsTruncated>false</IsTruncated><Upload><Key>go1.4.2.1</Key><UploadId>uploadid</UploadId><Initiator><ID></ID><DisplayName></DisplayName></Initiator><Owner><ID></ID><DisplayName></DisplayName></Owner><StorageClass></StorageClass><Initiated>2015-05-30T14:43:35.349Z</Initiated></Upload><Upload><Key>go1.4.2</Key><UploadId>uploadid2</UploadId><Initiator><ID></ID><DisplayName></DisplayName></Initiator><Owner><ID></ID><DisplayName></DisplayName></Owner><StorageClass></StorageClass><Initiated>2015-05-30T15:00:07.759Z</Initiated></Upload><Upload><Key>go1.5.0</Key><UploadId>uploadid2</UploadId><Initiator><ID></ID><DisplayName></DisplayName></Initiator><Owner><ID></ID><DisplayName></DisplayName></Owner><StorageClass></StorageClass><Initiated>2015-05-30T15:00:07.759Z</Initiated></Upload><Prefix></Prefix><Delimiter></Delimiter></ListMultipartUploadsResult>');
+        MockResponse('http://localhost:9000').get('/golang?uploads&max-uploads=1000&prefix=go1.4.2').reply(200, '<ListMultipartUploadsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Bucket>golang</Bucket><KeyMarker></KeyMarker><UploadIdMarker></UploadIdMarker><Prefix></Prefix><Delimiter></Delimiter><IsTruncated>false</IsTruncated></ListMultipartUploadsResult>');
+        MockResponse('http://localhost:9000')['delete']('/golang/go1.4.2?uploadId=uploadid2').reply(204);
+        client.removeIncompleteUpload('golang', 'go1.4.2', done);
+      });
+      it('should pass error to callback on list failure', function (done) {
+        MockResponse('http://localhost:9000').get('/golang?uploads&max-uploads=1000&prefix=go1.4.2').reply(400, generateError('code', 'message', 'requestid', 'hostid', 'resource'));
+        client.removeIncompleteUpload('golang', 'go1.4.2', checkError('code', 'message', 'requestid', 'hostid', 'resource', done));
+      });
+      it('should pass error to callback on second list failure', function (done) {
+        MockResponse('http://localhost:9000').get('/golang?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+        MockResponse('http://localhost:9000').get('/golang?uploads&max-uploads=1000&prefix=go1.4.2').reply(200, '<ListMultipartUploadsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Bucket>golang</Bucket><KeyMarker></KeyMarker><UploadIdMarker></UploadIdMarker><NextKeyMarker>keymarker</NextKeyMarker><NextUploadIdMarker>uploadmarker</NextUploadIdMarker><EncodingType></EncodingType><MaxUploads>1000</MaxUploads><IsTruncated>true</IsTruncated><Upload><Key>go1.4.2.1</Key><UploadId>uploadid</UploadId><Initiator><ID></ID><DisplayName></DisplayName></Initiator><Owner><ID></ID><DisplayName></DisplayName></Owner><StorageClass></StorageClass><Initiated>2015-05-30T14:43:35.349Z</Initiated></Upload><Upload><Key>go1.4.2.2</Key><UploadId>uploadid2</UploadId><Initiator><ID></ID><DisplayName></DisplayName></Initiator><Owner><ID></ID><DisplayName></DisplayName></Owner><StorageClass></StorageClass><Initiated>2015-05-30T15:00:07.759Z</Initiated></Upload><Prefix></Prefix><Delimiter></Delimiter></ListMultipartUploadsResult>');
+        MockResponse('http://localhost:9000').get('/golang?uploads&key-marker=keymarker&max-uploads=1000&prefix=go1.4.2&upload-id-marker=uploadmarker').reply(400, generateError('code', 'message', 'requestid', 'hostid', 'resource'));
+        client.removeIncompleteUpload('golang', 'go1.4.2', checkError('code', 'message', 'requestid', 'hostid', 'resource', done));
+      });
+      it('should return error on delete failure', function (done) {
+        MockResponse('http://localhost:9000').get('/golang?location').reply(200, '<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>');
+        MockResponse('http://localhost:9000').get('/golang?uploads&max-uploads=1000&prefix=go1.4.2').reply(200, '<ListMultipartUploadsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01"><Bucket>golang</Bucket><KeyMarker></KeyMarker><UploadIdMarker></UploadIdMarker><NextKeyMarker>keymarker</NextKeyMarker><NextUploadIdMarker>uploadmarker</NextUploadIdMarker><EncodingType></EncodingType><MaxUploads>1000</MaxUploads><IsTruncated>false</IsTruncated><Upload><Key>go1.4.2</Key><UploadId>uploadid</UploadId><Initiator><ID></ID><DisplayName></DisplayName></Initiator><Owner><ID></ID><DisplayName></DisplayName></Owner><StorageClass></StorageClass><Initiated>2015-05-30T14:43:35.349Z</Initiated></Upload><Upload><Key>go1.4.2.1</Key><UploadId>uploadid2</UploadId><Initiator><ID></ID><DisplayName></DisplayName></Initiator><Owner><ID></ID><DisplayName></DisplayName></Owner><StorageClass></StorageClass><Initiated>2015-05-30T15:00:07.759Z</Initiated></Upload><Prefix></Prefix><Delimiter></Delimiter></ListMultipartUploadsResult>');
+        MockResponse('http://localhost:9000')['delete']('/golang/go1.4.2?uploadId=uploadid').reply(400, generateError('code', 'message', 'requestid', 'hostid', 'resource'));
+        client.removeIncompleteUpload('golang', 'go1.4.2', checkError('code', 'message', 'requestid', 'hostid', 'resource', done));
+      });
+      it('should fail on null bucket', function (done) {
+        try {
+          client.removeIncompleteUpload(null, 'hello', function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on empty bucket', function (done) {
+        try {
+          client.removeIncompleteUpload('', 'hello', function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on empty bucket', function (done) {
+        try {
+          client.removeIncompleteUpload('  \n  \t  ', 'hello', function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on null object', function (done) {
+        try {
+          client.removeIncompleteUpload('hello', null, function () {});
+        } catch (e) {
+          done();
+        }
+      });
+      it('should fail on empty object', function (done) {
+        try {
+          client.removeIncompleteUpload('hello', '', function () {});
+        } catch (e) {
+          done();
+        }
+      });
+    });
+  });
+});
+
+var checkError = function checkError(code, message, requestid, hostid, resource, callback) {
+  if (!callback) throw new Error('callback can not be null');
+  return function (e) {
+    if (e === null) {
+      callback('expected error, received success');
+    }
+    _chai.assert.equal(e.name, 'S3Error');
+    _chai.assert.equal(e.code, code);
+    _chai.assert.equal(e.message, message);
+    _chai.assert.equal(e.requestid, requestid);
+    _chai.assert.equal(e.hostid, hostid);
+    _chai.assert.equal(e.resource, resource);
+    callback();
+  };
+};
+
+var generateError = function generateError(code, message, requestid, hostid, resource) {
+  return '<Error><Code>' + code + '</Code><Message>' + message + '</Message><RequestId>' + requestid + '</RequestId><HostId>' + hostid + '</HostId><Resource>' + resource + '</Resource></Error>';
+};
+//# sourceMappingURL=test.js.map
